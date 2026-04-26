@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Portfolio</title>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet"/>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+
+  <script>
+    const PORTFOLIO = JSON.parse('{{ portfolio | tojson | safe }}');
+    const RULES     = JSON.parse('{{ rules     | tojson | safe }}');
+    const GOALS     = JSON.parse('{{ goals     | tojson | safe }}');
+  </script>
+  <meta name="google-site-verification" content="google5514e18af6036924.html" />
+</head>
+<body>
+
+<!-- ── Topbar ── -->
+<div class="topbar">
+  <div class="topbar-left">
+    <label class="avatar" id="avatarWrap" title="Click to upload avatar">
+  <span id="avatarInitials" 
+         style="{{ 'display:none' if avatar_url else '' }}">you</span>
+  <img id="avatarImg" 
+       src="{{ avatar_url or '' }}" 
+       alt="avatar" 
+       style="{{ '' if avatar_url else 'display:none' }}"/>
+  <input type="file" accept="image/*" id="avatarInput" style="display:none"/>
+</label>
+    <div class="welcome-text">
+      <div class="welcome-hey">welcome back</div>
+      <div class="welcome-name">origino</div>
+    </div>
+  </div>
+  <div class="topbar-right">
+    <span class="last-updated" id="lastUpdated">--</span>
+    <button class="refresh-btn" id="toggleValues">👁 hide</button> 
+    <a href="/refresh" class="refresh-btn">↻ refresh</a>
+  </div>
+</div>
+
+<!-- ── Metrics ── -->
+<div class="metrics">
+  <div class="metric">
+    <div class="metric-label">Total value</div>
+    <div class="metric-value">${{ "{:,.2f}".format(portfolio.total_value) }}</div>
+    <div class="metric-sub {{ 'green' if portfolio.total_pnl >= 0 else 'red' }}">
+      {{ '+' if portfolio.total_pnl >= 0 else '' }}${{ "{:,.2f}".format(portfolio.total_pnl) }} all time
+    </div>
+  </div>
+  <div class="metric">
+    <div class="metric-label">Total return</div>
+    <div class="metric-value {{ 'green' if portfolio.total_return >= 0 else 'red' }}">
+      {{ '+' if portfolio.total_return >= 0 else '' }}{{ portfolio.total_return }}%
+    </div>
+    <div class="metric-sub muted">since first buy</div>
+  </div>
+  <div class="metric">
+    <div class="metric-label">Total cost</div>
+    <div class="metric-value">${{ "{:,.2f}".format(portfolio.total_cost) }}</div>
+    <div class="metric-sub muted">amount invested</div>
+  </div>
+  <div class="metric">
+    <div class="metric-label">Positions</div>
+    <div class="metric-value">{{ portfolio.holdings | length }}</div>
+    <div class="metric-sub muted">{{ portfolio.gaining }} gaining · {{ portfolio.losing }} down</div>
+  </div>
+</div>
+
+<!-- ── Main ── -->
+<div class="main">
+  <div class="card">
+    <div class="card-label">Holdings</div>
+    <table id="holdingsTable">
+      <thead>
+        <tr>
+          <th class="sortable" data-col="ticker" onclick="sortHoldings('ticker')">
+            Ticker <span class="sort-icon" id="sort-ticker"></span>
+          </th>
+          <th>Shares</th>
+          <th>Avg cost</th>
+          <th class="sortable" data-col="value" onclick="sortHoldings('value')">
+            Value <span class="sort-icon" id="sort-value"></span>
+          </th>
+          <th class="sortable" data-col="pnl_pct" onclick="sortHoldings('pnl_pct')">
+            P&amp;L <span class="sort-icon" id="sort-pnl_pct"></span>
+          </th>
+          <th class="sortable" data-col="alloc_pct" onclick="sortHoldings('alloc_pct')">
+            Alloc <span class="sort-icon" id="sort-alloc_pct"></span>
+          </th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="holdingsTbody">
+        {% for h in portfolio.holdings %}
+        <tr data-ticker="{{ h.ticker }}"
+            data-value="{{ h.value }}"
+            data-pnl_pct="{{ h.pnl_pct }}"
+            data-alloc_pct="{{ h.alloc_pct }}"
+            data-pnl="{{ h.pnl }}">
+          <td>
+            <div class="ticker-sym">{{ h.ticker }}</div>
+            <div class="ticker-co">{{ h.company_name or '' }}</div>
+          </td>
+          <td>{{ h.shares }}</td>
+          <td>${{ "{:,.2f}".format(h.avg_cost) }}</td>
+          <td>${{ "{:,.2f}".format(h.value) }}</td>
+          <td>
+            <span class="pill {{ 'g' if h.pnl >= 0 else 'r' }}">
+              {{ '+' if h.pnl >= 0 else '' }}{{ h.pnl_pct }}%
+            </span>
+          </td>
+          <td>{{ h.alloc_pct }}%</td>
+          <td>
+            <button class="del-btn" onclick='openEditHolding({{ h | tojson }})'>edit</button>
+            <form action="/holdings/delete/{{ h.id }}" method="POST" style="display:inline"
+                  onsubmit="return confirm('Remove {{ h.ticker }}?')">
+              <button class="del-btn" type="submit">✕</button>
+            </form>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" style="color:var(--muted);text-align:center;padding:20px">
+          No holdings yet — add one below
+        </td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <button class="add-btn" onclick="openAddHolding()">+ add / edit position</button>
+  </div>
+
+  <div class="card">
+    <div class="card-label">Allocation</div>
+    <div style="position:relative;height:190px">
+      <canvas id="pie"></canvas>
+    </div>
+    <div class="alloc-legend" id="allocLegend"></div>
+  </div>
+</div>
+
+<!-- ── Goals & Plan ── -->
+<div class="section-label">Plan &amp; goals</div>
+<div class="goals-grid">
+
+  <div class="card">
+    <div class="card-label">Portfolio targets</div>
+    {% set pv_pct = (portfolio.total_value / goals.portfolio_target * 100) if goals.portfolio_target else 0 %}
+    {% set mc_pct = (goals.monthly_contributed / goals.monthly_contribution_target * 100) if goals.monthly_contribution_target else 0 %}
+    <div class="prog-wrap">
+      <div class="prog-row">
+        <span>Portfolio value</span>
+        <span>${{ "{:,.0f}".format(portfolio.total_value) }} <span class="sub">/ ${{ "{:,.0f}".format(goals.portfolio_target) }}</span></span>
+      </div>
+      <div class="prog-bg"><div class="prog-fill" style="width:{{ [pv_pct,100]|min }}%;background:var(--blue)"></div></div>
+      <div class="prog-hint">{{ "{:.1f}".format(pv_pct) }}% to goal</div>
+    </div>
+    <div class="prog-wrap">
+      <div class="prog-row">
+        <span>Monthly contribution</span>
+        <span>${{ "{:,.0f}".format(goals.monthly_contributed) }} <span class="sub">/ ${{ "{:,.0f}".format(goals.monthly_contribution_target) }}</span></span>
+      </div>
+      <div class="prog-bg"><div class="prog-fill" style="width:{{ [mc_pct,100]|min }}%;background:var(--green)"></div></div>
+      <div class="prog-hint">${{ "{:,.0f}".format(goals.monthly_contribution_target - goals.monthly_contributed) }} left this month</div>
+    </div>
+    <button class="add-btn" style="margin-top:16px" onclick="openGoalsModal()">edit goals</button>
+  </div>
+
+  <div class="card">
+    <div class="card-label">Allocation rules</div>
+    <div class="rule-list">
+      {% for r in rules %}
+      <div class="rule-row">
+        <span class="rule-sym">{{ r.ticker }}</span>
+        <span class="rule-desc">
+          {% if r.target_pct is not none %}target {{ r.target_pct }}%{% endif %}
+          {% if r.min_pct is not none %} · min {{ r.min_pct }}%{% endif %}
+          {% if r.max_pct is not none %} · max {{ r.max_pct }}%{% endif %}
+        </span>
+        <div class="rule-actions">
+          <button class="del-btn" onclick='openEditRule({{ r | tojson }})'>edit</button>
+          <form action="/rules/delete/{{ r.id }}" method="POST" style="display:inline"
+                onsubmit="return confirm('Remove rule for {{ r.ticker }}?')">
+            <button class="del-btn" type="submit">✕</button>
+          </form>
+        </div>
+      </div>
+      {% else %}
+      <div style="color:var(--muted);font-size:12px;padding:8px 0">No rules set yet — add rules below</div>
+      {% endfor %}
+    </div>
+    <button class="add-btn" style="margin-top:14px" onclick="openRuleModal()">+ add rule</button>
+  </div>
+
+  <div class="card goals-full">
+    <div class="card-label">This month — suggested moves</div>
+    <div class="insight-list">
+      {% set alerts = portfolio.suggestions | selectattr('severity','eq','alert') | list %}
+      {% set warns  = portfolio.suggestions | selectattr('severity','eq','warn')  | list %}
+      {% set oks    = portfolio.suggestions | selectattr('severity','eq','ok')    | list %}
+
+      {% for s in alerts %}
+      <div class="insight">
+        <div class="i-dot r"></div>
+        <div><strong>Trim {{ s.ticker }}</strong>
+          <span>— {{ s.reason }}. Consider selling ${{ "{:,.0f}".format(s.amount) }} worth to rebalance.</span>
+        </div>
+      </div>
+      {% endfor %}
+
+      {% for s in warns %}
+      <div class="insight">
+        <div class="i-dot a"></div>
+        <div><strong>Buy {{ s.ticker }}</strong>
+          <span>— {{ s.reason }}. Allocate ${{ "{:,.0f}".format(s.amount) }} to hit target.</span>
+        </div>
+      </div>
+      {% endfor %}
+
+      {% if oks %}
+      <div class="insight">
+        <div class="i-dot g"></div>
+        <div><strong>{{ oks | map(attribute='ticker') | join(', ') }}</strong>
+          <span>— no action needed this month. All within target range.</span>
+        </div>
+      </div>
+      {% endif %}
+
+      {% if not portfolio.suggestions %}
+      <div style="color:var(--muted);font-size:12px">Set allocation rules above to get suggestions here.</div>
+      {% endif %}
+    </div>
+  </div>
+
+</div>
+
+<!-- ══════════════════════════════════════════════
+     MODALS
+════════════════════════════════════════════════ -->
+
+<!-- Holding modal -->
+<div class="modal-overlay" id="holdingModal">
+  <div class="modal">
+    <div class="modal-title" id="holdingModalTitle">Add position</div>
+    <div class="modal-fields" id="holdingPreview" style="display:none"></div>
+    <div id="holdingFormWrap">
+      <form id="holdingForm" action="/holdings/save" method="POST">
+        <div class="form-row">
+          <input class="form-input" name="ticker"       placeholder="TICKER"      required style="max-width:90px"/>
+          <input class="form-input" name="company_name" placeholder="Company name"/>
+        </div>
+        <div class="form-row">
+          <input class="form-input" name="shares"   placeholder="Shares"   type="number" step="any" required/>
+          <input class="form-input" name="avg_cost" placeholder="Avg cost" type="number" step="any" required/>
+        </div>
+        <div class="modal-actions" style="margin-top:18px">
+          <button type="button" class="modal-btn modal-cancel" onclick="closeModal('holdingModal')">cancel</button>
+          <button type="button" class="modal-btn modal-confirm" onclick="previewHolding()">review →</button>
+        </div>
+      </form>
+    </div>
+    <div id="holdingConfirmWrap" style="display:none">
+      <div class="modal-actions">
+        <button type="button" class="modal-btn modal-cancel" onclick="backToForm('holding')">← back</button>
+        <button type="button" class="modal-btn modal-confirm" onclick="document.getElementById('holdingForm').submit()">confirm save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Rule modal -->
+<div class="modal-overlay" id="ruleModal">
+  <div class="modal">
+    <div class="modal-title" id="ruleModalTitle">Add allocation rule</div>
+    <div class="modal-fields" id="rulePreview" style="display:none"></div>
+    <div id="ruleFormWrap">
+      <form id="ruleForm" action="/rules/save" method="POST">
+        <input type="hidden" name="rule_id" id="ruleId"/>
+        <div class="form-row">
+          <input class="form-input" name="ticker" placeholder="TICKER" required style="max-width:90px"/>
+        </div>
+        <div class="form-row">
+          <input class="form-input" name="target_pct" placeholder="Target %" type="number" step="any"/>
+          <input class="form-input" name="max_pct"    placeholder="Max %"    type="number" step="any"/>
+          <input class="form-input" name="min_pct"    placeholder="Min %"    type="number" step="any"/>
+        </div>
+        <div style="font-size:10px;color:var(--muted);font-family:var(--font-mono);margin-top:8px">
+          fill only what you want to enforce — leave others blank
+        </div>
+        <div class="modal-actions" style="margin-top:18px">
+          <button type="button" class="modal-btn modal-cancel" onclick="closeModal('ruleModal')">cancel</button>
+          <button type="button" class="modal-btn modal-confirm" onclick="previewRule()">review →</button>
+        </div>
+      </form>
+    </div>
+    <div id="ruleConfirmWrap" style="display:none">
+      <div class="modal-actions">
+        <button type="button" class="modal-btn modal-cancel" onclick="backToForm('rule')">← back</button>
+        <button type="button" class="modal-btn modal-confirm" onclick="document.getElementById('ruleForm').submit()">confirm save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Goals modal -->
+<div class="modal-overlay" id="goalsModal">
+  <div class="modal">
+    <div class="modal-title">Edit goals</div>
+    <div class="modal-fields" id="goalsPreview" style="display:none"></div>
+    <div id="goalsFormWrap">
+      <form id="goalsForm" action="/goals/save" method="POST">
+        <div class="form-row">
+          <input class="form-input" name="portfolio_target" placeholder="Portfolio target $"
+                 type="number" step="any" value="{{ goals.portfolio_target }}"/>
+        </div>
+        <div class="form-row">
+          <input class="form-input" name="monthly_contribution_target" placeholder="Monthly target $"
+                 type="number" step="any" value="{{ goals.monthly_contribution_target }}"/>
+          <input class="form-input" name="monthly_contributed" placeholder="Contributed so far $"
+                 type="number" step="any" value="{{ goals.monthly_contributed }}"/>
+        </div>
+        <div class="modal-actions" style="margin-top:18px">
+          <button type="button" class="modal-btn modal-cancel" onclick="closeModal('goalsModal')">cancel</button>
+          <button type="button" class="modal-btn modal-confirm" onclick="previewGoals()">review →</button>
+        </div>
+      </form>
+    </div>
+    <div id="goalsConfirmWrap" style="display:none">
+      <div class="modal-actions">
+        <button type="button" class="modal-btn modal-cancel" onclick="backToForm('goals')">← back</button>
+        <button type="button" class="modal-btn modal-confirm" onclick="document.getElementById('goalsForm').submit()">confirm save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="{{ url_for('static', filename='js/script.js') }}"></script>
+</body>
+</html>
